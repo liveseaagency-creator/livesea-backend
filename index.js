@@ -17,7 +17,78 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 ========================= */
 
 const GUILD_ID = "1286386371870724322";
-const ROLE_ID = "1291423302841139334";
+const CREATOR_ROLE_ID = "1291423302841139334";
+
+const PRESIDENT_ROLE_ID = "1291422525729017959";
+const DIRECTEUR_GENERAL_ROLE_ID = "1291422561434996837";
+const MANAGER_ROLE_ID = "1291423094887551056";
+const AGENT_ROLE_ID_1 = "1342649606818889789";
+const AGENT_ROLE_ID_2 = "1291423227792461865";
+const AMBASSADEUR_ROLE_ID = "1389241354323886240";
+
+/* =========================
+   HELPERS
+========================= */
+
+function getAvatarUrl(user) {
+  if (user.avatar) {
+    const isGif = user.avatar.startsWith("a_");
+    return `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.${isGif ? "gif" : "png"}`;
+  }
+
+  const discriminator = Number.parseInt(user.discriminator || "0", 10);
+  const index = Number.isNaN(discriminator) ? 0 : discriminator % 5;
+  return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
+}
+
+function getDisplayName(user, member) {
+  return user.global_name || member.nick || user.username || "Utilisateur";
+}
+
+function getHighestGrade(memberRoles = []) {
+  if (memberRoles.includes(PRESIDENT_ROLE_ID)) {
+    return {
+      gradeLabel: "Président d'agence",
+      rank: 5,
+    };
+  }
+
+  if (memberRoles.includes(DIRECTEUR_GENERAL_ROLE_ID)) {
+    return {
+      gradeLabel: "Directeur général",
+      rank: 4,
+    };
+  }
+
+  if (memberRoles.includes(MANAGER_ROLE_ID)) {
+    return {
+      gradeLabel: "Manager",
+      rank: 3,
+    };
+  }
+
+  if (
+    memberRoles.includes(AGENT_ROLE_ID_1) ||
+    memberRoles.includes(AGENT_ROLE_ID_2)
+  ) {
+    return {
+      gradeLabel: "Agent",
+      rank: 2,
+    };
+  }
+
+  if (memberRoles.includes(AMBASSADEUR_ROLE_ID)) {
+    return {
+      gradeLabel: "Ambassadeur-drice",
+      rank: 1,
+    };
+  }
+
+  return {
+    gradeLabel: null,
+    rank: 0,
+  };
+}
 
 /* =========================
    HEALTH CHECK
@@ -64,17 +135,14 @@ app.get("/auth/discord/callback", async (req, res) => {
       return res.status(500).send("Token error");
     }
 
-    const access_token = tokenData.access_token;
+    const accessToken = tokenData.access_token;
 
     /* USER */
-    const userResponse = await fetch(
-      "https://discord.com/api/users/@me",
-      {
-        headers: {
-          Authorization: `Bearer ${access_token}`,
-        },
-      }
-    );
+    const userResponse = await fetch("https://discord.com/api/users/@me", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
 
     const user = await userResponse.json();
 
@@ -95,22 +163,12 @@ app.get("/auth/discord/callback", async (req, res) => {
 
     const member = await memberResponse.json();
 
-    const hasRole = member.roles?.includes(ROLE_ID);
+    const hasRole = Array.isArray(member.roles)
+      ? member.roles.includes(CREATOR_ROLE_ID)
+      : false;
 
-    /* AVATAR */
-    let avatarUrl = "";
-
-    if (user.avatar) {
-      const isGif = user.avatar.startsWith("a_");
-      avatarUrl = `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.${isGif ? "gif" : "png"}`;
-    } else {
-      const index = parseInt(user.discriminator) % 5;
-      avatarUrl = `https://cdn.discordapp.com/embed/avatars/${index}.png`;
-    }
-
-    /* DISPLAY NAME */
-    const displayName =
-      user.global_name || user.username || "Utilisateur";
+    const avatarUrl = getAvatarUrl(user);
+    const displayName = user.global_name || user.username || "Utilisateur";
 
     console.log("User connected:", {
       id: user.id,
@@ -123,12 +181,12 @@ app.get("/auth/discord/callback", async (req, res) => {
     const appUrl = `exp://192.168.1.197:8081?status=${
       hasRole ? "approved" : "pending"
     }&id=${user.id}&username=${encodeURIComponent(
-      user.username
+      user.username || ""
     )}&displayName=${encodeURIComponent(
       displayName
-    )}&email=${encodeURIComponent(
-      user.email || ""
-    )}&avatar=${encodeURIComponent(avatarUrl)}`;
+    )}&email=${encodeURIComponent(user.email || "")}&avatar=${encodeURIComponent(
+      avatarUrl
+    )}`;
 
     return res.redirect(appUrl);
   } catch (error) {
@@ -138,7 +196,7 @@ app.get("/auth/discord/callback", async (req, res) => {
 });
 
 /* =========================
-   GET CREATORS (ROLE)
+   GET CREATORS
 ========================= */
 
 app.get("/creators", async (req, res) => {
@@ -160,32 +218,29 @@ app.get("/creators", async (req, res) => {
     }
 
     const creators = members
-      .filter((m) => m.roles.includes(ROLE_ID))
-      .map((m) => {
-        const user = m.user;
-
-        let avatarUrl = "";
-
-        if (user.avatar) {
-          const isGif = user.avatar.startsWith("a_");
-          avatarUrl = `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.${isGif ? "gif" : "png"}`;
-        } else {
-          const index = parseInt(user.discriminator) % 5;
-          avatarUrl = `https://cdn.discordapp.com/embed/avatars/${index}.png`;
-        }
+      .filter((member) => Array.isArray(member.roles) && member.roles.includes(CREATOR_ROLE_ID))
+      .map((member) => {
+        const user = member.user;
+        const { gradeLabel, rank } = getHighestGrade(member.roles);
 
         return {
           id: user.id,
           username: user.username,
-          displayName: user.global_name || m.nick || user.username,
-          avatar: avatarUrl,
+          displayName: getDisplayName(user, member),
+          avatar: getAvatarUrl(user),
+          gradeLabel,
+          rank,
         };
+      })
+      .sort((a, b) => {
+        if (b.rank !== a.rank) return b.rank - a.rank;
+        return a.username.localeCompare(b.username, "fr", { sensitivity: "base" });
       });
 
-    res.json(creators);
+    return res.json(creators);
   } catch (error) {
     console.error("Creators error:", error);
-    res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 });
 
