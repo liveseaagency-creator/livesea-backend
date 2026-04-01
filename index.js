@@ -3,22 +3,34 @@ import fetch from "node-fetch";
 
 const app = express();
 
-// 🔐 ENV
+/* =========================
+   ENV
+========================= */
+
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 
-// 🎯 CONFIG
+/* =========================
+   CONFIG
+========================= */
+
 const GUILD_ID = "1286386371870724322";
 const ROLE_ID = "1291423302841139334";
 
-// 📡 HEALTH CHECK
+/* =========================
+   HEALTH CHECK
+========================= */
+
 app.get("/", (req, res) => {
-  res.send("LiveSea backend running");
+  res.send("Backend running");
 });
 
-// 🔑 CALLBACK DISCORD
+/* =========================
+   DISCORD AUTH CALLBACK
+========================= */
+
 app.get("/auth/discord/callback", async (req, res) => {
   const code = req.query.code;
 
@@ -27,7 +39,7 @@ app.get("/auth/discord/callback", async (req, res) => {
   }
 
   try {
-    // 🔁 1. GET TOKEN
+    /* TOKEN */
     const tokenResponse = await fetch(
       "https://discord.com/api/oauth2/token",
       {
@@ -48,13 +60,13 @@ app.get("/auth/discord/callback", async (req, res) => {
     const tokenData = await tokenResponse.json();
 
     if (!tokenData.access_token) {
-      console.error("❌ Token error:", tokenData);
+      console.error("Token error:", tokenData);
       return res.status(500).send("Token error");
     }
 
     const access_token = tokenData.access_token;
 
-    // 👤 2. USER INFOS
+    /* USER */
     const userResponse = await fetch(
       "https://discord.com/api/users/@me",
       {
@@ -67,11 +79,11 @@ app.get("/auth/discord/callback", async (req, res) => {
     const user = await userResponse.json();
 
     if (!user.id) {
-      console.error("❌ User error:", user);
+      console.error("User error:", user);
       return res.status(500).send("User error");
     }
 
-    // 🎭 3. MEMBER (ROLES)
+    /* MEMBER (roles) */
     const memberResponse = await fetch(
       `https://discord.com/api/guilds/${GUILD_ID}/members/${user.id}`,
       {
@@ -85,7 +97,7 @@ app.get("/auth/discord/callback", async (req, res) => {
 
     const hasRole = member.roles?.includes(ROLE_ID);
 
-    // 🧠 4. AVATAR LOGIC PROPRE
+    /* AVATAR */
     let avatarUrl = "";
 
     if (user.avatar) {
@@ -96,22 +108,18 @@ app.get("/auth/discord/callback", async (req, res) => {
       avatarUrl = `https://cdn.discordapp.com/embed/avatars/${index}.png`;
     }
 
-    // 🧠 5. USERNAME PRO (nouveau système Discord)
+    /* DISPLAY NAME */
     const displayName =
       user.global_name || user.username || "Utilisateur";
 
-    // 🧾 DEBUG PROPRE
-    console.log("✅ USER CONNECTED:");
-    console.log({
+    console.log("User connected:", {
       id: user.id,
       username: user.username,
-      global_name: user.global_name,
-      email: user.email,
-      avatar: avatarUrl,
+      displayName,
       hasRole,
     });
 
-    // 🔗 6. DEEP LINK APP
+    /* REDIRECT APP */
     const appUrl = `exp://192.168.1.197:8081?status=${
       hasRole ? "approved" : "pending"
     }&id=${user.id}&username=${encodeURIComponent(
@@ -124,14 +132,69 @@ app.get("/auth/discord/callback", async (req, res) => {
 
     return res.redirect(appUrl);
   } catch (error) {
-    console.error("🔥 ERROR:", error);
+    console.error("Callback error:", error);
     return res.status(500).send("Internal server error");
   }
 });
 
-// 🚀 START
+/* =========================
+   GET CREATORS (ROLE)
+========================= */
+
+app.get("/creators", async (req, res) => {
+  try {
+    const response = await fetch(
+      `https://discord.com/api/v10/guilds/${GUILD_ID}/members?limit=1000`,
+      {
+        headers: {
+          Authorization: `Bot ${BOT_TOKEN}`,
+        },
+      }
+    );
+
+    const members = await response.json();
+
+    if (!Array.isArray(members)) {
+      console.error("Discord API error:", members);
+      return res.status(500).json({ error: "Discord API error" });
+    }
+
+    const creators = members
+      .filter((m) => m.roles.includes(ROLE_ID))
+      .map((m) => {
+        const user = m.user;
+
+        let avatarUrl = "";
+
+        if (user.avatar) {
+          const isGif = user.avatar.startsWith("a_");
+          avatarUrl = `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.${isGif ? "gif" : "png"}`;
+        } else {
+          const index = parseInt(user.discriminator) % 5;
+          avatarUrl = `https://cdn.discordapp.com/embed/avatars/${index}.png`;
+        }
+
+        return {
+          id: user.id,
+          username: user.username,
+          displayName: user.global_name || m.nick || user.username,
+          avatar: avatarUrl,
+        };
+      });
+
+    res.json(creators);
+  } catch (error) {
+    console.error("Creators error:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+/* =========================
+   START SERVER
+========================= */
+
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("🚀 Server running on port", PORT);
+  console.log("Server running on port", PORT);
 });
