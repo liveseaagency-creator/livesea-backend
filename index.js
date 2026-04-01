@@ -48,7 +48,7 @@ function getDisplayName(user, member) {
 function getHighestGrade(memberRoles = []) {
   if (memberRoles.includes(PRESIDENT_ROLE_ID)) {
     return {
-      gradeLabel: "Président d'agence",
+      gradeLabel: "Président",
       rank: 5,
     };
   }
