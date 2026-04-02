@@ -1,5 +1,6 @@
 import express from "express";
 import fetch from "node-fetch";
+import { query } from "./db.js";
 
 const app = express();
 
@@ -42,52 +43,34 @@ function getAvatarUrl(user) {
 }
 
 function getDisplayName(user, member) {
-  return user.global_name || member.nick || user.username || "Utilisateur";
+  return user.global_name || member?.nick || user.username || "Utilisateur";
 }
 
 function getHighestGrade(memberRoles = []) {
   if (memberRoles.includes(PRESIDENT_ROLE_ID)) {
-    return {
-      gradeLabel: "Président",
-      rank: 5,
-    };
+    return { gradeLabel: "Président", rank: 5 };
   }
 
   if (memberRoles.includes(DIRECTEUR_GENERAL_ROLE_ID)) {
-    return {
-      gradeLabel: "Directeur général",
-      rank: 4,
-    };
+    return { gradeLabel: "Directeur général", rank: 4 };
   }
 
   if (memberRoles.includes(MANAGER_ROLE_ID)) {
-    return {
-      gradeLabel: "Manager",
-      rank: 3,
-    };
+    return { gradeLabel: "Manager", rank: 3 };
   }
 
   if (
     memberRoles.includes(AGENT_ROLE_ID_1) ||
     memberRoles.includes(AGENT_ROLE_ID_2)
   ) {
-    return {
-      gradeLabel: "Agent",
-      rank: 2,
-    };
+    return { gradeLabel: "Agent", rank: 2 };
   }
 
   if (memberRoles.includes(AMBASSADEUR_ROLE_ID)) {
-    return {
-      gradeLabel: "Ambassadeur-drice",
-      rank: 1,
-    };
+    return { gradeLabel: "Ambassadeur-drice", rank: 1 };
   }
 
-  return {
-    gradeLabel: null,
-    rank: 0,
-  };
+  return { gradeLabel: null, rank: 0 };
 }
 
 /* =========================
@@ -110,7 +93,10 @@ app.get("/auth/discord/callback", async (req, res) => {
   }
 
   try {
-    /* TOKEN */
+    /* =========================
+       TOKEN
+    ========================= */
+
     const tokenResponse = await fetch(
       "https://discord.com/api/oauth2/token",
       {
@@ -137,7 +123,10 @@ app.get("/auth/discord/callback", async (req, res) => {
 
     const accessToken = tokenData.access_token;
 
-    /* USER */
+    /* =========================
+       USER DISCORD
+    ========================= */
+
     const userResponse = await fetch("https://discord.com/api/users/@me", {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -151,7 +140,10 @@ app.get("/auth/discord/callback", async (req, res) => {
       return res.status(500).send("User error");
     }
 
-    /* MEMBER (roles) */
+    /* =========================
+       MEMBER (ROLES)
+    ========================= */
+
     const memberResponse = await fetch(
       `https://discord.com/api/guilds/${GUILD_ID}/members/${user.id}`,
       {
@@ -167,8 +159,31 @@ app.get("/auth/discord/callback", async (req, res) => {
       ? member.roles.includes(CREATOR_ROLE_ID)
       : false;
 
+    /* =========================
+       🔥 GET TIKTOK FROM DB
+    ========================= */
+
+    let tiktokData = null;
+
+    try {
+      const rows = await query(
+        "SELECT tiktok_username, tiktok_nickname, tiktok_uid FROM users_tiktok WHERE discord_user_id = ? LIMIT 1",
+        [user.id]
+      );
+
+      if (Array.isArray(rows) && rows.length > 0) {
+        tiktokData = rows[0];
+      }
+
+      console.log("TikTok DB:", tiktokData);
+    } catch (err) {
+      console.error("DB error:", err);
+    }
+
+    /* ========================= */
+
     const avatarUrl = getAvatarUrl(user);
-    const displayName = user.global_name || user.username || "Utilisateur";
+    const displayName = getDisplayName(user, member);
 
     console.log("User connected:", {
       id: user.id,
@@ -177,16 +192,22 @@ app.get("/auth/discord/callback", async (req, res) => {
       hasRole,
     });
 
-    /* REDIRECT APP */
+    /* =========================
+       REDIRECT APP ✅
+    ========================= */
+
     const appUrl = `exp://192.168.1.197:8081?status=${
       hasRole ? "approved" : "pending"
-    }&id=${user.id}&username=${encodeURIComponent(
-      user.username || ""
-    )}&displayName=${encodeURIComponent(
-      displayName
-    )}&email=${encodeURIComponent(user.email || "")}&avatar=${encodeURIComponent(
-      avatarUrl
-    )}`;
+    }&id=${user.id}
+&username=${encodeURIComponent(user.username || "")}
+&displayName=${encodeURIComponent(displayName)}
+&email=${encodeURIComponent(user.email || "")}
+&avatar=${encodeURIComponent(avatarUrl)}
+&tiktokUsername=${encodeURIComponent(tiktokData?.tiktok_username || "")}
+&tiktokNickname=${encodeURIComponent(tiktokData?.tiktok_nickname || "")}
+&tiktokUid=${encodeURIComponent(tiktokData?.tiktok_uid || "")}`;
+
+    console.log("Redirect URL:", appUrl);
 
     return res.redirect(appUrl);
   } catch (error) {
@@ -218,7 +239,11 @@ app.get("/creators", async (req, res) => {
     }
 
     const creators = members
-      .filter((member) => Array.isArray(member.roles) && member.roles.includes(CREATOR_ROLE_ID))
+      .filter(
+        (member) =>
+          Array.isArray(member.roles) &&
+          member.roles.includes(CREATOR_ROLE_ID)
+      )
       .map((member) => {
         const user = member.user;
         const { gradeLabel, rank } = getHighestGrade(member.roles);
@@ -234,7 +259,9 @@ app.get("/creators", async (req, res) => {
       })
       .sort((a, b) => {
         if (b.rank !== a.rank) return b.rank - a.rank;
-        return a.username.localeCompare(b.username, "fr", { sensitivity: "base" });
+        return a.username.localeCompare(b.username, "fr", {
+          sensitivity: "base",
+        });
       });
 
     return res.json(creators);
