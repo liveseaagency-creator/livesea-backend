@@ -247,3 +247,26 @@ app.get("/tiktok/:discordId", async (req, res) => {
     return res.status(500).json({ error: "DB error" });
   }
 });
+
+/* =========================
+   GET LIVE CREATORS
+========================= */
+
+app.get("/creator-lives", async (req, res) => {
+  try {
+    const rows = await query(`
+      SELECT 
+        creator_id,
+        tiktok_username,
+        is_live,
+        started_at
+      FROM creator_lives
+      WHERE is_live = 1
+    `);
+
+    return res.json(rows);
+  } catch (err) {
+    console.error("creator-lives error:", err);
+    return res.status(500).json({ error: "DB error" });
+  }
+});
