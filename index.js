@@ -1,5 +1,6 @@
 import express from "express";
 import fetch from "node-fetch";
+import { query } from "./db.js";
 
 const app = express();
 
@@ -221,4 +222,28 @@ const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log("Server running on port", PORT);
+});
+
+/* =========================
+   GET TIKTOK BY DISCORD ID
+========================= */
+
+app.get("/tiktok/:discordId", async (req, res) => {
+  const discordId = req.params.discordId;
+
+  if (!discordId) {
+    return res.status(400).json({ error: "Missing discordId" });
+  }
+
+  try {
+    const rows = await query(
+      "SELECT tiktok_username, tiktok_nickname, tiktok_uid FROM users_tiktok WHERE discord_user_id = ? LIMIT 1",
+      [String(discordId)]
+    );
+
+    return res.json(rows[0] || null);
+  } catch (err) {
+    console.error("DB error:", err);
+    return res.status(500).json({ error: "DB error" });
+  }
 });
