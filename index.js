@@ -1,5 +1,7 @@
 import express from "express";
 import fetch from "node-fetch";
+import { query } from "./db.js";
+import "dotenv/config";
 
 const app = express();
 
@@ -35,40 +37,32 @@ function getAvatarUrl(user) {
     const isGif = user.avatar.startsWith("a_");
     return `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.${isGif ? "gif" : "png"}`;
   }
-
-  const discriminator = Number.parseInt(user.discriminator || "0", 10);
-  const index = Number.isNaN(discriminator) ? 0 : discriminator % 5;
-  return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
+  return `https://cdn.discordapp.com/embed/avatars/0.png`;
 }
 
 function getDisplayName(user, member) {
-  return user.global_name || member.nick || user.username || "Utilisateur";
+  return user.global_name || member?.nick || user.username || "Utilisateur";
 }
 
 function getHighestGrade(memberRoles = []) {
   if (memberRoles.includes(PRESIDENT_ROLE_ID)) {
     return { gradeLabel: "Président", rank: 5 };
   }
-
   if (memberRoles.includes(DIRECTEUR_GENERAL_ROLE_ID)) {
     return { gradeLabel: "Directeur général", rank: 4 };
   }
-
   if (memberRoles.includes(MANAGER_ROLE_ID)) {
     return { gradeLabel: "Manager", rank: 3 };
   }
-
   if (
     memberRoles.includes(AGENT_ROLE_ID_1) ||
     memberRoles.includes(AGENT_ROLE_ID_2)
   ) {
     return { gradeLabel: "Agent", rank: 2 };
   }
-
   if (memberRoles.includes(AMBASSADEUR_ROLE_ID)) {
     return { gradeLabel: "Ambassadeur-drice", rank: 1 };
   }
-
   return { gradeLabel: null, rank: 0 };
 }
 
@@ -81,15 +75,13 @@ app.get("/", (req, res) => {
 });
 
 /* =========================
-   DISCORD AUTH CALLBACK
+   DISCORD AUTH
 ========================= */
 
 app.get("/auth/discord/callback", async (req, res) => {
   const code = req.query.code;
 
-  if (!code) {
-    return res.status(400).send("Missing code");
-  }
+  if (!code) return res.status(400).send("Missing code");
 
   try {
     /* TOKEN */
@@ -133,7 +125,7 @@ app.get("/auth/discord/callback", async (req, res) => {
       return res.status(500).send("User error");
     }
 
-    /* MEMBER (roles) */
+    /* MEMBER */
     const memberResponse = await fetch(
       `https://discord.com/api/guilds/${GUILD_ID}/members/${user.id}`,
       {
@@ -150,7 +142,7 @@ app.get("/auth/discord/callback", async (req, res) => {
       : false;
 
     const avatarUrl = getAvatarUrl(user);
-    const displayName = user.global_name || user.username || "Utilisateur";
+    const displayName = getDisplayName(user, member);
 
     console.log("User connected:", {
       id: user.id,
@@ -159,7 +151,7 @@ app.get("/auth/discord/callback", async (req, res) => {
       hasRole,
     });
 
-    /* REDIRECT APP */
+    /* REDIRECT */
     const appUrl =
       `exp://192.168.1.197:8081?status=${hasRole ? "approved" : "pending"}` +
       `&id=${user.id}` +
@@ -170,8 +162,28 @@ app.get("/auth/discord/callback", async (req, res) => {
 
     return res.redirect(appUrl);
   } catch (error) {
-    console.error("Callback error:", error);
+    console.error(error);
     return res.status(500).send("Internal server error");
+  }
+});
+
+/* =========================
+   GET TIKTOK (DB)
+========================= */
+
+app.get("/tiktok/:discordId", async (req, res) => {
+  const discordId = req.params.discordId;
+
+  try {
+    const rows = await query(
+      "SELECT tiktok_username, tiktok_nickname, tiktok_uid FROM users_tiktok WHERE discord_user_id = ? LIMIT 1",
+      [String(discordId)]
+    );
+
+    return res.json(rows[0] || null);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "DB error" });
   }
 });
 
@@ -192,47 +204,35 @@ app.get("/creators", async (req, res) => {
 
     const members = await response.json();
 
-    if (!Array.isArray(members)) {
-      console.error("Discord API error:", members);
-      return res.status(500).json({ error: "Discord API error" });
-    }
-
     const creators = members
       .filter(
-        (member) =>
-          Array.isArray(member.roles) &&
-          member.roles.includes(CREATOR_ROLE_ID)
+        (m) =>
+          Array.isArray(m.roles) &&
+          m.roles.includes(CREATOR_ROLE_ID)
       )
-      .map((member) => {
-        const user = member.user;
-        const { gradeLabel, rank } = getHighestGrade(member.roles);
+      .map((m) => {
+        const user = m.user;
+        const { gradeLabel, rank } = getHighestGrade(m.roles);
 
         return {
           id: user.id,
           username: user.username,
-          displayName: getDisplayName(user, member),
+          displayName: getDisplayName(user, m),
           avatar: getAvatarUrl(user),
           gradeLabel,
           rank,
         };
       })
-      .sort((a, b) => {
-        if (b.rank !== a.rank) return b.rank - a.rank;
-        return a.username.localeCompare(b.username, "fr", {
-          sensitivity: "base",
-        });
-      });
+      .sort((a, b) => b.rank - a.rank);
 
     return res.json(creators);
-  } catch (error) {
-    console.error("Creators error:", error);
+  } catch (err) {
+    console.error(err);
     return res.status(500).json({ error: "Server error" });
   }
 });
 
-/* =========================
-   START SERVER
-========================= */
+/* ========================= */
 
 const PORT = process.env.PORT || 3000;
 
